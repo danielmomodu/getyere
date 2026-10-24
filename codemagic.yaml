@@ -33,6 +33,11 @@ workflows:
       - name: Copy the web build and plugins into the iOS project
         script: npx cap sync ios
 
+      - name: Keep iOS minimum at 16
+        script: |
+          sed -i '' 's/.iOS(.v15)/.iOS(.v16)/' ios/App/CapApp-SPM/Package.swift
+          grep -n "platforms" ios/App/CapApp-SPM/Package.swift
+
       - name: Apply code signing to the Xcode project
         script: xcode-project use-profiles
 
