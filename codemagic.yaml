@@ -16,7 +16,7 @@ workflows:
       vars:
         XCODE_PROJECT: "ios/App/App.xcodeproj"
         XCODE_SCHEME: "App"
-        APP_STORE_APPLE_ID: 1234567890 # CHANGE LATER: App Store Connect > Yere > General > App Information > Apple ID
+        APP_STORE_APPLE_ID: 6826483998
       node: 22
       xcode: latest
 
