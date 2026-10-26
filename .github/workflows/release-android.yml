@@ -1,0 +1,109 @@
+name: Release Android AAB
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: Android versionCode for this release (must be higher than the last upload to Play)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release-aab:
+    name: Signed release AAB
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # Public, browser-safe values only (repository VARIABLES), same as build-android.yml.
+    env:
+      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+      VITE_PUBLIC_APP_URL: ${{ vars.VITE_PUBLIC_APP_URL }}
+      VITE_VAPID_PUBLIC_KEY: ${{ vars.VITE_VAPID_PUBLIC_KEY }}
+    steps:
+      - name: Validate version_code
+        env:
+          VERSION_CODE: ${{ inputs.version_code }}
+        run: |
+          if ! printf '%s' "${VERSION_CODE}" | grep -Eq '^[1-9][0-9]*$'; then
+            echo "::error title=Invalid version_code::version_code must be a positive integer."
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Decode signing keystore
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_B64}" ]; then
+            echo "::error title=Missing keystore::Add ANDROID_KEYSTORE_B64 in repository Actions secrets."
+            exit 1
+          fi
+          keystore="${RUNNER_TEMP}/yere-release.keystore"
+          printf '%s' "${ANDROID_KEYSTORE_B64}" | base64 --decode > "${keystore}"
+          echo "YERE_KEYSTORE_PATH=${keystore}" >> "$GITHUB_ENV"
+
+      - name: Build native web bundle
+        run: npm run build:native
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+
+      - name: Install Firebase Android config (optional, from encrypted secret)
+        env:
+          GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GOOGLE_SERVICES_JSON_B64}" ]; then
+            echo "::warning title=Android push disabled::GOOGLE_SERVICES_JSON_B64 is not set. This build has no Firebase Cloud Messaging configuration."
+            exit 0
+          fi
+          printf '%s' "${GOOGLE_SERVICES_JSON_B64}" | base64 --decode > android/app/google-services.json
+
+      - name: Set Android versionCode
+        env:
+          VERSION_CODE: ${{ inputs.version_code }}
+        run: |
+          set -euo pipefail
+          sed -i -E "s/^( *)versionCode [0-9]+/\1versionCode ${VERSION_CODE}/" android/app/build.gradle
+          grep -n 'versionCode' android/app/build.gradle
+
+      - name: Build signed release bundle
+        working-directory: android
+        env:
+          YERE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          YERE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          YERE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon --stacktrace bundleRelease
+
+      - name: Upload release AAB
+        uses: actions/upload-artifact@v7
+        with:
+          name: yere-android-release-${{ inputs.version_code }}
+          path: android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+          retention-days: 14

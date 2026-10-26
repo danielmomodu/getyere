@@ -16,8 +16,30 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Release signing is configured only when all four variables are present, so debug and
+    // local builds keep working without a keystore. Nothing is hardcoded here.
+    def releaseKeystorePath = System.getenv('YERE_KEYSTORE_PATH')
+    def releaseKeystorePassword = System.getenv('YERE_KEYSTORE_PASSWORD')
+    def releaseKeyAlias = System.getenv('YERE_KEY_ALIAS')
+    def releaseKeyPassword = System.getenv('YERE_KEY_PASSWORD')
+    def hasReleaseSigning = [releaseKeystorePath, releaseKeystorePassword, releaseKeyAlias, releaseKeyPassword].every { it }
+
+    if (hasReleaseSigning) {
+        signingConfigs {
+            release {
+                storeFile file(releaseKeystorePath)
+                storePassword releaseKeystorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
